@@ -11,7 +11,7 @@
 package comp3011;
 
 import java.util.List;
-
+import java.util.ArrayList;
 import javafx.application.Application;
 import javafx.geometry.Rectangle2D;
 import javafx.scene.Scene;
@@ -34,6 +34,7 @@ public class VideoPlayerApp extends Application {
     private static CommandLineController commandLineController;
 
     private VideoPlayerController controller;
+    private SubtitleTrack subtitleTrack;
     private Stage stage;
     private Rectangle2D selectedScreenBounds;
     private int videoWidth;
@@ -43,9 +44,13 @@ public class VideoPlayerApp extends Application {
     public void start(Stage stage) {
         this.stage = stage;
 
+        subtitleTrack = new SubtitleTrack(commandLineController.isSubtitlesRequested());
+        DemoSubtitleSource.populate(subtitleTrack);
+
         controller = new VideoPlayerController(
                 commandLineController.isAudioRequested(),
                 createFrameProcessors(),
+                subtitleTrack,
                 this::setVideoSize);
 
         Scene scene = new Scene(controller.getView().getRoot());
@@ -65,9 +70,19 @@ public class VideoPlayerApp extends Application {
     }
 
     private List<FrameProcessor> createFrameProcessors() {
-        return commandLineController.getFrameProcessorOptions().stream()
+        List<FrameProcessor> processors = new ArrayList<>(commandLineController.getFrameProcessorOptions().stream()
                 .map(FrameProcessorOption::create)
-                .toList();
+                .toList());
+
+        if (processors.stream().noneMatch(FrameSubtitler.class::isInstance)) {
+            processors.add(new FrameSubtitler());
+        }
+        for (FrameProcessor processor : processors) {
+            if (processor instanceof FrameSubtitler subtitler) {
+                subtitler.attach(subtitleTrack);
+            }
+        }
+        return processors;
     }
 
     
@@ -147,6 +162,7 @@ public class VideoPlayerApp extends Application {
 
     // Entry point.
     public static void main(String[] args) {
+        System.setProperty("java.awt.headless", "true");
         commandLineController = new CommandLineController(args);
 
         if (!commandLineController.shouldLaunchApplication()) {

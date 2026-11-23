@@ -31,13 +31,16 @@ public class VideoPlayerController {
     private final VideoPlayerModel model;
     private final VideoPlayerView view;
     private final BiConsumer<Integer, Integer> videoSizeChangedHandler;
+    private final SubtitleTrack subtitleTrack;
 
     public VideoPlayerController(
             boolean audioEnabled,
             List<FrameProcessor> frameProcessors,
+            SubtitleTrack subtitleTrack,
             BiConsumer<Integer, Integer> videoSizeChangedHandler) {
         this.view = new VideoPlayerView();
         this.videoSizeChangedHandler = videoSizeChangedHandler;
+        this.subtitleTrack = subtitleTrack;
         model = new VideoPlayerModel(
                 audioEnabled,
                 frameProcessors,
@@ -54,6 +57,8 @@ public class VideoPlayerController {
         view.getStopButton().setOnAction(_ -> stopAndExit());
         view.getAudioButton().setOnAction(_ -> toggleAudioOutput());
         view.showAudioEnabled(model.isAudioOutputEnabled());
+        view.getSubtitleButton().setOnAction(_ -> toggleSubtitles());
+        view.showSubtitlesEnabled(subtitleTrack.isEnabled());
     }
 
     public void installKeyboardShortcuts(Scene scene) {
@@ -75,6 +80,9 @@ public class VideoPlayerController {
                 event.consume();
             } else if (event.getCode() == KeyCode.A) {
                 toggleAudioOutput();
+                event.consume();
+            } else if (event.getCode() == KeyCode.S) {
+                toggleSubtitles();
                 event.consume();
             }
         });
@@ -111,6 +119,11 @@ public class VideoPlayerController {
 
     private void toggleAudioOutput() {
         model.toggleAudioOutput();
+    }
+    
+    private void toggleSubtitles() {
+        boolean enabled = subtitleTrack.toggleEnabled();
+        view.showSubtitlesEnabled(enabled);
     }
 
     private void stopAndExit() {

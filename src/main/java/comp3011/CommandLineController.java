@@ -118,6 +118,10 @@ public class CommandLineController {
     public boolean shouldLaunchApplication() {
         return errorMessage == null && videoFile != null;
     }
+    
+    public boolean isSubtitlesRequested() {
+        return frameProcessorOptions.contains(FrameProcessorOption.SUBTITLE);
+    }
 
     private void parse() {
         List<String> videoFiles = new ArrayList<>();

@@ -15,7 +15,8 @@ public enum FrameProcessorOption {
     JITTER('j', "jitter-frames", "Randomly displace frames by a few pixels", FrameJitterer::new),
     MOTTLE('m', "mottle-frames", "Add cloudy emulsion mottling", FrameMottler::new),
     BLEED('b', "bleed-frames", "Bleed light into frames", FrameBleeder::new),
-    PEPPER('p', "pepper-frames", "Pepper frames with dark spots/blotches", FramePepperer::new);
+    PEPPER('p', "pepper-frames", "Pepper frames with dark spots/blotches", FramePepperer::new),
+    SUBTITLE('S', "subtitle-frames", "Add speech-to-text subtitles to frames", FrameSubtitler::new);
 
     private final char shortName;
     private final String longName;

@@ -30,6 +30,7 @@ import javafx.scene.shape.Line;
 import javafx.scene.shape.Polygon;
 import javafx.scene.shape.SVGPath;
 import javafx.scene.shape.StrokeLineCap;
+import javafx.scene.shape.Rectangle;
 
 /**
  * The view part of the video player model-view-controller architecture.
@@ -57,6 +58,7 @@ public class VideoPlayerView {
     private final Button forwardFiveButton;
     private final Button stopButton;
     private final Button audioButton;
+    private final Button subtitleButton;
 
     public VideoPlayerView() {
         imageView.setPreserveRatio(true);
@@ -75,6 +77,7 @@ public class VideoPlayerView {
         forwardFiveButton = iconButton(createLoopIcon(true, "5"));
         stopButton = iconButton(createStopIcon());
         audioButton = iconButton(createAudioIcon(false));
+        subtitleButton = iconButton(createSubtitleIcon(false));
         setPlaybackControlsDisabled(true);
 
         HBox controls = new HBox(
@@ -85,6 +88,7 @@ public class VideoPlayerView {
                 forwardFiveButton,
                 stopButton,
                 audioButton,
+                subtitleButton,
                 statusLabel);
 
         controls.setPadding(new Insets(10));
@@ -126,6 +130,10 @@ public class VideoPlayerView {
     public Button getAudioButton() {
         return audioButton;
     }
+    
+    public Button getSubtitleButton() {
+        return subtitleButton;
+    }
 
     public void setStatus(String status) {
         statusLabel.setText(status);
@@ -150,6 +158,10 @@ public class VideoPlayerView {
     public void showAudioEnabled(boolean audioEnabled) {
         audioButton.setGraphic(createAudioIcon(audioEnabled));
     }
+    
+    public void showSubtitlesEnabled(boolean subtitlesEnabled) {
+        subtitleButton.setGraphic(createSubtitleIcon(subtitlesEnabled));
+    }
 
     public void setPlaybackControlsDisabled(boolean disabled) {
         startOverButton.setDisable(disabled);
@@ -169,6 +181,7 @@ public class VideoPlayerView {
         setButtonTooltip(forwardFiveButton, "[RIGHT]");
         setButtonTooltip(stopButton, "[ESC]");
         setButtonTooltip(audioButton, "[A]");
+        setButtonTooltip(subtitleButton, "[S]");
     }
 
     private void setButtonTooltip(Button button, String text) {
@@ -333,6 +346,39 @@ public class VideoPlayerView {
             Line slashDown = audioLine(19, 9, 25, 19);
             Line slashUp = audioLine(25, 9, 19, 19);
             pane.getChildren().addAll(slashDown, slashUp);
+        }
+
+        return pane;
+    }
+    
+    private Node createSubtitleIcon(boolean subtitlesEnabled) {
+        Pane pane = new Pane();
+        pane.setMinSize(ICON_SIZE, ICON_SIZE);
+        pane.setPrefSize(ICON_SIZE, ICON_SIZE);
+        pane.setMaxSize(ICON_SIZE, ICON_SIZE);
+
+        Color colour = subtitlesEnabled ? Color.BLACK : Color.GRAY;
+
+        Rectangle box = new Rectangle(3, 7, 22, 14);
+        box.setArcWidth(5);
+        box.setArcHeight(5);
+        box.setFill(null);
+        box.setStroke(colour);
+        box.setStrokeWidth(2.0);
+
+        Label text = new Label("CC");
+        text.setAlignment(Pos.CENTER);
+        text.setMinSize(ICON_SIZE, ICON_SIZE);
+        text.setPrefSize(ICON_SIZE, ICON_SIZE);
+        text.setMaxSize(ICON_SIZE, ICON_SIZE);
+        text.setStyle("-fx-font-size: 10px; -fx-font-weight: bold; -fx-text-fill: "
+                + (subtitlesEnabled ? "black" : "gray") + ";");
+        text.setMouseTransparent(true);
+
+        pane.getChildren().addAll(box, text);
+
+        if (!subtitlesEnabled) {
+            pane.getChildren().add(audioLine(4, 24, 24, 4));
         }
 
         return pane;
