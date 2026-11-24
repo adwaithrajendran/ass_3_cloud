@@ -4,7 +4,7 @@
  * 
  * Authors:
  *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
- *   2. <student name and student number insert here upon modification>
+ *   2. Adwaith Rajendran, a1911056
  *
  * Copyright 2026 Simon Ratcliffe
  */
@@ -35,6 +35,7 @@ public class VideoPlayerApp extends Application {
 
     private VideoPlayerController controller;
     private SubtitleTrack subtitleTrack;
+    private SubtitleFetcher subtitleFetcher;
     private Stage stage;
     private Rectangle2D selectedScreenBounds;
     private int videoWidth;
@@ -45,7 +46,6 @@ public class VideoPlayerApp extends Application {
         this.stage = stage;
 
         subtitleTrack = new SubtitleTrack(commandLineController.isSubtitlesRequested());
-        DemoSubtitleSource.populate(subtitleTrack);
 
         controller = new VideoPlayerController(
                 commandLineController.isAudioRequested(),
@@ -110,6 +110,8 @@ public class VideoPlayerApp extends Application {
     }
 
     private void playVideo() {
+        subtitleFetcher = new SubtitleFetcher(commandLineController.getVideoFile(), subtitleTrack, new SubtitleClient());
+        subtitleFetcher.start();
         controller.play(commandLineController.getVideoFile());
     }
 
@@ -155,6 +157,9 @@ public class VideoPlayerApp extends Application {
 
     @Override
     public void stop() {
+        if (subtitleFetcher != null) {
+            subtitleFetcher.stop();
+        }
         if (controller != null) {
             controller.shutdown();
         }

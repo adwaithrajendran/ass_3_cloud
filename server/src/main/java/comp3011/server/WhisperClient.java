@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
@@ -53,14 +54,21 @@ public class WhisperClient {
     }
 
     private String readKey() {
-        try {
-            String key = Files.readString(keyFile).trim();
-            if (key.isEmpty()) {
-                throw new IllegalStateException("API key file is empty: " + keyFile);
+        for (Path candidate : List.of(keyFile, Path.of("key.txt"))) {
+            if (Files.isReadable(candidate)) {
+                try {
+                    String key = Files.readString(candidate).trim();
+                    if (!key.isEmpty()) {
+                        return key;
+                    }
+                } catch (IOException e) {
+                }
             }
-            return key;
-        } catch (IOException e) {
-            throw new IllegalStateException("Cannot read API key file: " + keyFile);
         }
+        String fromEnvironment = System.getenv("OPENAI_API_KEY");
+        if (fromEnvironment != null && !fromEnvironment.isBlank()) {
+            return fromEnvironment.trim();
+        }
+        throw new IllegalStateException("No API key found in " + keyFile + ", ./key.txt or OPENAI_API_KEY");
     }
 }

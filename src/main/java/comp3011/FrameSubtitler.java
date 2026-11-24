@@ -12,6 +12,8 @@ import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.nio.ByteBuffer;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.bytedeco.javacv.Frame;
 
@@ -22,15 +24,18 @@ public class FrameSubtitler extends FrameProcessor {
     private static final double BOTTOM_MARGIN_FRACTION = 0.06;
     private static final double OUTLINE_FRACTION = 0.2;
     private static final double LINE_SPACING = 1.2;
+    private static final int MAX_CACHED_OVERLAYS = 32;
 
+    private final Map<SubtitleCue, Overlay> overlays = new ConcurrentHashMap<>();
+    private volatile Geometry geometry;
     private SubtitleTrack track;
-    private volatile Overlay cachedOverlay;
 
     public FrameSubtitler() {
     }
 
     public void attach(SubtitleTrack track) {
         this.track = track;
+        track.addCueListener(this::prerender);
     }
 
     @Override
@@ -42,44 +47,71 @@ public class FrameSubtitler extends FrameProcessor {
         if (videoInfo.imageChannels() != 1 && videoInfo.imageChannels() < 3) {
             throw new Exception("FrameSubtitler requires 1 (grey) or 3+ (BGR) image channels");
         }
-        cachedOverlay = null;
-        renderOverlay(new SubtitleCue(0, 1, List.of("Warm-up 0123456789, ?!'")));
+        Geometry newGeometry = new Geometry(
+                videoInfo.imageWidth(),
+                videoInfo.imageHeight(),
+                videoInfo.imageStride(),
+                videoInfo.imageChannels());
+        geometry = newGeometry;
+        overlays.clear();
+        renderOverlay(new SubtitleCue(0, 1, List.of("Warm-up 0123456789, ?!'")), newGeometry);
     }
 
     @Override
     public void process(Frame frame, InfoFrame info) throws Exception {
-        if (track == null || !track.isEnabled()) {
+        if (track == null) {
+            return;
+        }
+        long timestampUs = info.timestampUs();
+        track.reportPlayhead(timestampUs);
+
+        if (!track.isEnabled()) {
             return;
         }
         if (frame.image == null || frame.image.length == 0 || !(frame.image[0] instanceof ByteBuffer pixels)) {
             return;
         }
+        Geometry currentGeometry = geometry;
+        if (currentGeometry == null) {
+            return;
+        }
 
-        SubtitleCue cue = track.cueAt(info.timestampUs());
+        SubtitleCue cue = track.cueAt(timestampUs);
         if (cue == null || cue.lines().isEmpty()) {
             return;
         }
 
-        Overlay overlay = cachedOverlay;
-        if (overlay == null || overlay.cue() != cue) {
-            overlay = renderOverlay(cue);
-            cachedOverlay = overlay;
+        Overlay overlay = overlays.get(cue);
+        if (overlay == null || overlay.geometry() != currentGeometry) {
+            overlay = renderOverlay(cue, currentGeometry);
+            overlays.put(cue, overlay);
         }
         blend(pixels, overlay);
+
+        if (overlays.size() > MAX_CACHED_OVERLAYS) {
+            overlays.keySet().removeIf(cached -> cached.endUs() < timestampUs);
+        }
     }
 
-    private Overlay renderOverlay(SubtitleCue cue) {
-        int frameWidth = videoInfo.imageWidth();
-        int frameHeight = videoInfo.imageHeight();
+    private void prerender(List<SubtitleCue> cues) {
+        Geometry currentGeometry = geometry;
+        if (currentGeometry == null) {
+            return;
+        }
+        for (SubtitleCue cue : cues) {
+            overlays.computeIfAbsent(cue, key -> renderOverlay(key, currentGeometry));
+        }
+    }
 
+    private Overlay renderOverlay(SubtitleCue cue, Geometry target) {
         FontRenderContext context = new FontRenderContext(null, true, true);
-        Font font = fittedFont(cue.lines(), frameWidth, frameHeight, context);
+        Font font = fittedFont(cue.lines(), target, context);
         float outlineWidth = (float) Math.max(2.0, font.getSize2D() * OUTLINE_FRACTION);
         int lineHeight = (int) Math.ceil(font.getSize2D() * LINE_SPACING);
         int padding = (int) Math.ceil(outlineWidth);
         int overlayHeight = lineHeight * cue.lines().size() + 2 * padding;
 
-        BufferedImage image = new BufferedImage(frameWidth, overlayHeight, BufferedImage.TYPE_INT_ARGB);
+        BufferedImage image = new BufferedImage(target.width(), overlayHeight, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = image.createGraphics();
         try {
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
@@ -88,7 +120,7 @@ public class FrameSubtitler extends FrameProcessor {
 
             for (int i = 0; i < cue.lines().size(); i++) {
                 TextLayout layout = new TextLayout(cue.lines().get(i), font, context);
-                double x = (frameWidth - layout.getAdvance()) / 2.0;
+                double x = (target.width() - layout.getAdvance()) / 2.0;
                 double baseline = padding + i * lineHeight + layout.getAscent();
                 Shape glyphs = layout.getOutline(AffineTransform.getTranslateInstance(x, baseline));
 
@@ -101,13 +133,13 @@ public class FrameSubtitler extends FrameProcessor {
             g.dispose();
         }
 
-        int bottomMargin = (int) Math.round(frameHeight * BOTTOM_MARGIN_FRACTION);
-        int top = Math.max(0, frameHeight - bottomMargin - overlayHeight);
-        return Overlay.from(cue, image, top, frameHeight);
+        int bottomMargin = (int) Math.round(target.height() * BOTTOM_MARGIN_FRACTION);
+        int top = Math.max(0, target.height() - bottomMargin - overlayHeight);
+        return Overlay.from(target, image, top);
     }
 
-    private Font fittedFont(List<String> lines, int frameWidth, int frameHeight, FontRenderContext context) {
-        float size = (float) Math.max(MIN_FONT_SIZE, frameHeight * FONT_HEIGHT_FRACTION);
+    private Font fittedFont(List<String> lines, Geometry target, FontRenderContext context) {
+        float size = (float) Math.max(MIN_FONT_SIZE, target.height() * FONT_HEIGHT_FRACTION);
         Font font = new Font(Font.SANS_SERIF, Font.BOLD, 1).deriveFont(size);
 
         double widest = 0;
@@ -116,16 +148,18 @@ public class FrameSubtitler extends FrameProcessor {
                 widest = Math.max(widest, new TextLayout(line, font, context).getAdvance());
             }
         }
-        double maxWidth = frameWidth * MAX_TEXT_WIDTH_FRACTION;
+        double maxWidth = target.width() * MAX_TEXT_WIDTH_FRACTION;
         if (widest > maxWidth) {
             font = font.deriveFont((float) Math.max(MIN_FONT_SIZE, size * maxWidth / widest));
         }
         return font;
     }
 
-    private void blend(ByteBuffer pixels, Overlay overlay) {
-        int stride = videoInfo.imageStride();
-        int channels = videoInfo.imageChannels();
+    private static void blend(ByteBuffer pixels, Overlay overlay) {
+        Geometry target = overlay.geometry();
+        int stride = target.stride();
+        int channels = target.channels();
+        int width = target.width();
 
         for (int i = 0; i < overlay.offsets().length; i++) {
             int argb = overlay.argb()[i];
@@ -134,8 +168,8 @@ public class FrameSubtitler extends FrameProcessor {
             int green = (argb >> 8) & 0xFF;
             int blue = argb & 0xFF;
 
-            int x = overlay.offsets()[i] % overlay.width();
-            int y = overlay.top() + overlay.offsets()[i] / overlay.width();
+            int x = overlay.offsets()[i] % width;
+            int y = overlay.top() + overlay.offsets()[i] / width;
             int base = y * stride + x * channels;
 
             if (channels == 1) {
@@ -154,11 +188,14 @@ public class FrameSubtitler extends FrameProcessor {
         pixels.put(index, (byte) ((source * alpha + destination * (255 - alpha) + 127) / 255));
     }
 
-    private record Overlay(SubtitleCue cue, int width, int top, int[] offsets, int[] argb) {
+    private record Geometry(int width, int height, int stride, int channels) {
+    }
 
-        static Overlay from(SubtitleCue cue, BufferedImage image, int top, int frameHeight) {
+    private record Overlay(Geometry geometry, int top, int[] offsets, int[] argb) {
+
+        static Overlay from(Geometry geometry, BufferedImage image, int top) {
             int width = image.getWidth();
-            int visibleRows = Math.min(image.getHeight(), frameHeight - top);
+            int visibleRows = Math.min(image.getHeight(), geometry.height() - top);
             int[] all = image.getRGB(0, 0, width, visibleRows, null, 0, width);
 
             int visible = 0;
@@ -168,17 +205,17 @@ public class FrameSubtitler extends FrameProcessor {
                 }
             }
 
-            int[] offsetArray = new int[visible];
-            int[] argbArray = new int[visible];
+            int[] offsets = new int[visible];
+            int[] argb = new int[visible];
             int next = 0;
             for (int i = 0; i < all.length; i++) {
                 if ((all[i] >>> 24) != 0) {
-                    offsetArray[next] = i;
-                    argbArray[next] = all[i];
+                    offsets[next] = i;
+                    argb[next] = all[i];
                     next++;
                 }
             }
-            return new Overlay(cue, width, top, offsetArray, argbArray);
+            return new Overlay(geometry, top, offsets, argb);
         }
     }
 }
